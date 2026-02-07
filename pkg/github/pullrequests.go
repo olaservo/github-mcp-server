@@ -2018,6 +2018,116 @@ func RequestCopilotReview(t translations.TranslationHelperFunc) inventory.Server
 		})
 }
 
+// GetPullRequestDiffWithUI creates a tool that displays PR diffs with a visual UI.
+// This tool is specifically designed to work with the MCP Apps diff viewer UI.
+func GetPullRequestDiffWithUI(t translations.TranslationHelperFunc) inventory.ServerTool {
+	schema := &jsonschema.Schema{
+		Type: "object",
+		Properties: map[string]*jsonschema.Schema{
+			"owner": {
+				Type:        "string",
+				Description: "Repository owner",
+			},
+			"repo": {
+				Type:        "string",
+				Description: "Repository name",
+			},
+			"pullNumber": {
+				Type:        "number",
+				Description: "Pull request number",
+			},
+			"viewMode": {
+				Type:        "string",
+				Description: "Display mode for the diff: 'unified' (default) shows changes inline, 'split' shows old and new side by side",
+				Enum:        []any{"unified", "split"},
+			},
+		},
+		Required: []string{"owner", "repo", "pullNumber"},
+	}
+
+	return NewTool(
+		ToolsetMetadataPullRequests,
+		mcp.Tool{
+			Name:        "get_pull_request_diff",
+			Description: t("TOOL_GET_PR_DIFF_WITH_UI_DESCRIPTION", "View a pull request diff with syntax highlighting. Opens an interactive diff viewer."),
+			Annotations: &mcp.ToolAnnotations{
+				Title:        t("TOOL_GET_PR_DIFF_WITH_UI_TITLE", "View PR Diff"),
+				ReadOnlyHint: true,
+			},
+			InputSchema: schema,
+			Meta: map[string]any{
+				"ui/resourceUri": "ui://github-mcp/diff-viewer.html",
+			},
+		},
+		[]scopes.Scope{scopes.Repo},
+		func(ctx context.Context, deps ToolDependencies, _ *mcp.CallToolRequest, args map[string]any) (*mcp.CallToolResult, any, error) {
+			owner, err := RequiredParam[string](args, "owner")
+			if err != nil {
+				return utils.NewToolResultError(err.Error()), nil, nil
+			}
+			repo, err := RequiredParam[string](args, "repo")
+			if err != nil {
+				return utils.NewToolResultError(err.Error()), nil, nil
+			}
+			pullNumber, err := RequiredInt(args, "pullNumber")
+			if err != nil {
+				return utils.NewToolResultError(err.Error()), nil, nil
+			}
+
+			viewMode, _ := OptionalParam[string](args, "viewMode")
+			if viewMode == "" {
+				viewMode = "unified"
+			}
+
+			client, err := deps.GetClient(ctx)
+			if err != nil {
+				return utils.NewToolResultErrorFromErr("failed to get GitHub client", err), nil, nil
+			}
+
+			raw, resp, err := client.PullRequests.GetRaw(
+				ctx,
+				owner,
+				repo,
+				pullNumber,
+				github.RawOptions{Type: github.Diff},
+			)
+			if err != nil {
+				return ghErrors.NewGitHubAPIErrorResponse(ctx,
+					"failed to get pull request diff",
+					resp,
+					err,
+				), nil, nil
+			}
+			defer func() { _ = resp.Body.Close() }()
+
+			if resp.StatusCode != http.StatusOK {
+				body, err := io.ReadAll(resp.Body)
+				if err != nil {
+					return nil, nil, fmt.Errorf("failed to read response body: %w", err)
+				}
+				return ghErrors.NewGitHubAPIStatusErrorResponse(ctx, "failed to get pull request diff", resp, body), nil, nil
+			}
+
+			// Create structured content for the UI
+			structuredContent := map[string]any{
+				"diff":       string(raw),
+				"owner":      owner,
+				"repo":       repo,
+				"pullNumber": pullNumber,
+				"viewMode":   viewMode,
+			}
+
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{
+						Text: string(raw),
+					},
+				},
+				StructuredContent: structuredContent,
+			}, nil, nil
+		})
+}
+
 // newGQLString like takes something that approximates a string (of which there are many types in shurcooL/githubv4)
 // and constructs a pointer to it, or nil if the string is empty. This is extremely useful because when we parse
 // params from the MCP request, we need to convert them to types that are pointers of type def strings and it's

@@ -214,6 +214,7 @@ func AllTools(t translations.TranslationHelperFunc) []inventory.ServerTool {
 		PullRequestReviewWrite(t),
 		AddCommentToPendingReview(t),
 		AddReplyToPullRequestComment(t),
+		GetPullRequestDiffWithUI(t),
 
 		// Code security tools
 		GetCodeScanningAlert(t),
