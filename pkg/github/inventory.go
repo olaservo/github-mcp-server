@@ -10,9 +10,36 @@ import (
 // This function is stateless - no dependencies are captured.
 // Handlers are generated on-demand during registration via RegisterAll(ctx, server, deps).
 // The "default" keyword in WithToolsets will expand to toolsets marked with Default: true.
-func NewInventory(t translations.TranslationHelperFunc) *inventory.Builder {
+func NewInventory(t translations.TranslationHelperFunc, opts ...InventoryOption) *inventory.Builder {
+	cfg := inventoryConfig{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	tools := AllTools(t, cfg.host)
+	if cfg.rootsMode {
+		tools = MakeOwnerRepoOptional(tools)
+	}
 	return inventory.NewBuilder().
-		SetTools(AllTools(t)).
+		SetTools(tools).
 		SetResources(AllResources(t)).
 		SetPrompts(AllPrompts(t))
+}
+
+// inventoryConfig holds configuration options for building the inventory.
+type inventoryConfig struct {
+	host      string
+	rootsMode bool
+}
+
+// InventoryOption configures inventory building.
+type InventoryOption func(*inventoryConfig)
+
+// WithHost sets the GitHub host for tool configuration.
+func WithHost(host string) InventoryOption {
+	return func(c *inventoryConfig) { c.host = host }
+}
+
+// WithRootsMode enables roots mode, making owner/repo optional in tool schemas.
+func WithRootsMode(enabled bool) InventoryOption {
+	return func(c *inventoryConfig) { c.rootsMode = enabled }
 }
