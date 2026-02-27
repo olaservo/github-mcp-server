@@ -2,6 +2,7 @@ package github
 
 import (
 	"fmt"
+	"maps"
 	"net/url"
 	"slices"
 	"strings"
@@ -11,8 +12,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// GitHubRoot represents a parsed GitHub repository root.
-type GitHubRoot struct {
+// Root represents a parsed GitHub repository root.
+type Root struct {
 	Owner string
 	Repo  string
 	URI   string
@@ -77,8 +78,8 @@ func ParseGitHubRootURI(uri string, host string) (owner, repo string, err error)
 
 // ParseGitHubRoots parses a list of MCP roots and returns those that are valid GitHub repository URIs.
 // Non-GitHub roots are silently skipped.
-func ParseGitHubRoots(roots []*mcp.Root, host string) []GitHubRoot {
-	var result []GitHubRoot
+func ParseGitHubRoots(roots []*mcp.Root, host string) []Root {
+	var result []Root
 	for _, root := range roots {
 		if root == nil {
 			continue
@@ -87,7 +88,7 @@ func ParseGitHubRoots(roots []*mcp.Root, host string) []GitHubRoot {
 		if err != nil {
 			continue // skip non-GitHub roots
 		}
-		result = append(result, GitHubRoot{
+		result = append(result, Root{
 			Owner: owner,
 			Repo:  repo,
 			URI:   root.URI,
@@ -132,9 +133,7 @@ func MakeOwnerRepoOptional(tools []inventory.ServerTool) []inventory.ServerTool 
 		// Update property descriptions to indicate they default from roots
 		if schemaCopy.Properties != nil {
 			newProps := make(map[string]*jsonschema.Schema, len(schemaCopy.Properties))
-			for k, v := range schemaCopy.Properties {
-				newProps[k] = v
-			}
+			maps.Copy(newProps, schemaCopy.Properties)
 			if ownerProp, exists := newProps["owner"]; exists && ownerProp != nil {
 				propCopy := *ownerProp
 				propCopy.Description += " (optional when roots are configured)"
