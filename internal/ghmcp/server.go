@@ -130,7 +130,7 @@ func NewStdioMCPServer(ctx context.Context, cfg github.MCPServerConfig) (*mcp.Se
 		featureChecker,
 	)
 	// Build and register the tool/resource/prompt inventory
-	inventoryBuilder := github.NewInventory(cfg.Translator, github.WithHost(cfg.Host), github.WithRootsMode(cfg.RootsMode)).
+	inventoryBuilder := github.NewInventory(cfg.Translator, github.WithHost(cfg.Host), github.WithRootsMode(cfg.InsidersMode)).
 		WithDeprecatedAliases(github.DeprecatedToolAliases).
 		WithReadOnly(cfg.ReadOnly).
 		WithToolsets(github.ResolvedEnabledToolsets(cfg.DynamicToolsets, cfg.EnabledToolsets, cfg.EnabledTools)).
@@ -222,10 +222,6 @@ type StdioServerConfig struct {
 
 	// RepoAccessCacheTTL overrides the default TTL for repository access cache entries.
 	RepoAccessCacheTTL *time.Duration
-
-	// RootsMode enables MCP roots support for non-file URI schemes.
-	// When enabled, the server infers owner/repo from client-configured roots.
-	RootsMode bool
 }
 
 // RunStdioServer is not concurrent safe.
@@ -285,7 +281,6 @@ func RunStdioServer(cfg StdioServerConfig) error {
 		Logger:            logger,
 		RepoAccessTTL:     cfg.RepoAccessCacheTTL,
 		TokenScopes:       tokenScopes,
-		RootsMode:         cfg.RootsMode,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create MCP server: %w", err)

@@ -72,12 +72,6 @@ type MCPServerConfig struct {
 	// This is used for PAT scope filtering where we can't issue scope challenges.
 	TokenScopes []string
 
-	// RootsMode enables MCP roots support. When enabled, the server will:
-	// - Make owner/repo optional in tool schemas (they default from roots)
-	// - Inject owner/repo from roots into tool arguments via middleware
-	// This demonstrates SEP-2202 non-file URI roots with git:// and https:// schemes.
-	RootsMode bool
-
 	// Additional server options to apply
 	ServerOptions []MCPServerOption
 }
@@ -112,7 +106,7 @@ func NewMCPServer(ctx context.Context, cfg *MCPServerConfig, deps ToolDependenci
 	// Add middlewares. Order matters - for example, the error context middleware should be applied last so that it runs FIRST (closest to the handler) to ensure all errors are captured,
 	// and any middleware that needs to read or modify the context should be before it.
 	ghServer.AddReceivingMiddleware(middleware...)
-	if cfg.RootsMode {
+	if cfg.InsidersMode {
 		ghServer.AddReceivingMiddleware(RootsMiddleware(cfg.Host, cfg.Logger))
 	}
 	ghServer.AddReceivingMiddleware(InjectDepsMiddleware(deps))

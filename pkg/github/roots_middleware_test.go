@@ -19,7 +19,7 @@ func testLogger() *slog.Logger {
 func TestRootsMiddleware_PassthroughNonToolsCall(t *testing.T) {
 	middleware := RootsMiddleware("github.com", testLogger())
 	called := false
-	next := func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+	next := func(_ context.Context, _ string, _ mcp.Request) (mcp.Result, error) {
 		called = true
 		return nil, nil
 	}
@@ -33,7 +33,7 @@ func TestRootsMiddleware_PassthroughNonToolsCall(t *testing.T) {
 func TestRootsMiddleware_PassthroughNilSession(t *testing.T) {
 	middleware := RootsMiddleware("github.com", testLogger())
 	called := false
-	next := func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+	next := func(_ context.Context, _ string, _ mcp.Request) (mcp.Result, error) {
 		called = true
 		return nil, nil
 	}
@@ -73,7 +73,7 @@ func TestRootsMiddleware_Integration(t *testing.T) {
 			"type":       "object",
 			"properties": map[string]any{},
 		},
-	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
 				&mcp.TextContent{Text: string(req.Params.Arguments)},
@@ -155,7 +155,7 @@ func TestRootsMiddleware_MultipleRoots(t *testing.T) {
 			"type":       "object",
 			"properties": map[string]any{},
 		},
-	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
 				&mcp.TextContent{Text: string(req.Params.Arguments)},
@@ -217,7 +217,7 @@ func TestRootsMiddleware_NoRoots(t *testing.T) {
 			"type":       "object",
 			"properties": map[string]any{},
 		},
-	}, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
 				&mcp.TextContent{Text: string(req.Params.Arguments)},

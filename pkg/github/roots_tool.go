@@ -21,7 +21,7 @@ type rootInfo struct {
 // ListRootsTool creates a tool that lists the MCP roots configured by the client
 // and shows the parsed GitHub owner/repo for each root.
 func ListRootsTool(t translations.TranslationHelperFunc, host string) inventory.ServerTool {
-	return NewTool(
+	tool := NewTool(
 		ToolsetMetadataContext,
 		mcp.Tool{
 			Name:        "list_roots",
@@ -68,4 +68,6 @@ func ListRootsTool(t translations.TranslationHelperFunc, host string) inventory.
 			return MarshalledTextResult(infos), nil, nil
 		},
 	)
+	tool.InsidersOnly = true
+	return tool
 }
