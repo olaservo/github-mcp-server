@@ -190,7 +190,7 @@ func RunHTTPServer(cfg ServerConfig) error {
 func initGlobalToolScopeMap(t translations.TranslationHelperFunc) error {
 	// Build inventory with all tools to extract scope information
 	inv, err := inventory.NewBuilder().
-		SetTools(github.AllTools(t)).
+		SetTools(github.AllTools(t, "")).
 		Build()
 
 	if err != nil {

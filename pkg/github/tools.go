@@ -157,12 +157,14 @@ var (
 
 // AllTools returns all tools with their embedded toolset metadata.
 // Tool functions return ServerTool directly with toolset info.
-func AllTools(t translations.TranslationHelperFunc) []inventory.ServerTool {
+// The host parameter is used to configure the list_roots tool for GitHub Enterprise support.
+func AllTools(t translations.TranslationHelperFunc, host string) []inventory.ServerTool {
 	return []inventory.ServerTool{
 		// Context tools
 		GetMe(t),
 		GetTeams(t),
 		GetTeamMembers(t),
+		ListRootsTool(t, host),
 
 		// Repository tools
 		SearchRepositories(t),

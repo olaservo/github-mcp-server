@@ -17,7 +17,7 @@ func stubTranslation(_, fallback string) string {
 // - Toolset must be set (non-empty ID)
 // - ReadOnlyHint annotation must be explicitly set (not nil)
 func TestAllToolsHaveRequiredMetadata(t *testing.T) {
-	tools := AllTools(stubTranslation)
+	tools := AllTools(stubTranslation, "")
 
 	require.NotEmpty(t, tools, "AllTools should return at least one tool")
 
@@ -83,7 +83,7 @@ func TestAllPromptsHaveRequiredMetadata(t *testing.T) {
 
 // TestToolReadOnlyHintConsistency validates that read-only tools are correctly annotated
 func TestToolReadOnlyHintConsistency(t *testing.T) {
-	tools := AllTools(stubTranslation)
+	tools := AllTools(stubTranslation, "")
 
 	for _, tool := range tools {
 		t.Run(tool.Tool.Name, func(t *testing.T) {
@@ -99,7 +99,7 @@ func TestToolReadOnlyHintConsistency(t *testing.T) {
 
 // TestNoDuplicateToolNames ensures all tools have unique names
 func TestNoDuplicateToolNames(t *testing.T) {
-	tools := AllTools(stubTranslation)
+	tools := AllTools(stubTranslation, "")
 	seen := make(map[string]bool)
 	featureFlagged := make(map[string]bool)
 
@@ -155,7 +155,7 @@ func TestNoDuplicatePromptNames(t *testing.T) {
 
 // TestAllToolsHaveHandlerFunc ensures all tools have a handler function
 func TestAllToolsHaveHandlerFunc(t *testing.T) {
-	tools := AllTools(stubTranslation)
+	tools := AllTools(stubTranslation, "")
 
 	for _, tool := range tools {
 		t.Run(tool.Tool.Name, func(t *testing.T) {
@@ -169,7 +169,7 @@ func TestAllToolsHaveHandlerFunc(t *testing.T) {
 
 // TestToolsetMetadataConsistency ensures tools in the same toolset have consistent descriptions
 func TestToolsetMetadataConsistency(t *testing.T) {
-	tools := AllTools(stubTranslation)
+	tools := AllTools(stubTranslation, "")
 	toolsetDescriptions := make(map[inventory.ToolsetID]string)
 
 	for _, tool := range tools {

@@ -1,0 +1,88 @@
+package github
+
+import (
+	"context"
+	"encoding/json"
+	"log/slog"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+// RootsMiddleware returns middleware that injects owner/repo defaults from MCP roots
+// into tool call arguments. When the client has configured exactly one GitHub root
+// and a tool call is missing owner/repo, the middleware fills them in automatically.
+func RootsMiddleware(host string, logger *slog.Logger) mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, request mcp.Request) (mcp.Result, error) {
+			if method != "tools/call" {
+				return next(ctx, method, request)
+			}
+
+			callReq, ok := request.(*mcp.CallToolRequest)
+			if !ok || callReq.Session == nil {
+				return next(ctx, method, request)
+			}
+
+			// List roots from the client
+			rootsResult, err := callReq.Session.ListRoots(ctx, nil)
+			if err != nil {
+				// Client may not support roots — continue without injection
+				logger.Debug("roots middleware: ListRoots failed, continuing without root defaults", "error", err)
+				return next(ctx, method, request)
+			}
+
+			if rootsResult == nil || len(rootsResult.Roots) == 0 {
+				return next(ctx, method, request)
+			}
+
+			// Parse GitHub roots
+			ghRoots := ParseGitHubRoots(rootsResult.Roots, host)
+			if len(ghRoots) != 1 {
+				// Either no valid GitHub roots or multiple — require explicit owner/repo
+				return next(ctx, method, request)
+			}
+
+			root := ghRoots[0]
+
+			// Unmarshal existing arguments
+			var args map[string]any
+			if len(callReq.Params.Arguments) > 0 {
+				if err := json.Unmarshal(callReq.Params.Arguments, &args); err != nil {
+					// Can't parse arguments — let the handler deal with it
+					return next(ctx, method, request)
+				}
+			}
+			if args == nil {
+				args = make(map[string]any)
+			}
+
+			// Only inject if owner/repo are missing
+			modified := false
+			if _, hasOwner := args["owner"]; !hasOwner {
+				args["owner"] = root.Owner
+				modified = true
+			}
+			if _, hasRepo := args["repo"]; !hasRepo {
+				args["repo"] = root.Repo
+				modified = true
+			}
+
+			if !modified {
+				return next(ctx, method, request)
+			}
+
+			// Re-marshal and update the request
+			newArgs, err := json.Marshal(args)
+			if err != nil {
+				logger.Warn("roots middleware: failed to marshal modified arguments", "error", err)
+				return next(ctx, method, request)
+			}
+			callReq.Params.Arguments = newArgs
+
+			logger.Debug("roots middleware: injected owner/repo from root",
+				"owner", root.Owner, "repo", root.Repo, "tool", callReq.Params.Name)
+
+			return next(ctx, method, request)
+		}
+	}
+}
