@@ -3,12 +3,26 @@ package github
 import (
 	"testing"
 
+	"github.com/github/github-mcp-server/internal/toolsnaps"
 	"github.com/github/github-mcp-server/pkg/inventory"
+	"github.com/github/github-mcp-server/pkg/translations"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func Test_ListRootsTool(t *testing.T) {
+	t.Parallel()
+
+	serverTool := ListRootsTool(translations.NullTranslationHelper, "")
+	tool := serverTool.Tool
+	require.NoError(t, toolsnaps.Test(tool.Name, tool))
+
+	assert.Equal(t, "list_roots", tool.Name)
+	assert.True(t, tool.Annotations.ReadOnlyHint, "list_roots tool should be read-only")
+	assert.True(t, serverTool.InsidersOnly, "list_roots tool should be insiders-only")
+}
 
 func TestParseGitHubRootURI(t *testing.T) {
 	tests := []struct {

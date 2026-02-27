@@ -1,0 +1,12 @@
+{
+  "annotations": {
+    "readOnlyHint": true,
+    "title": "List configured roots"
+  },
+  "description": "List the MCP roots configured by the client. Shows the root URIs and any parsed GitHub owner/repo information. Use this to understand which repositories are in scope.",
+  "inputSchema": {
+    "properties": {},
+    "type": "object"
+  },
+  "name": "list_roots"
+}
