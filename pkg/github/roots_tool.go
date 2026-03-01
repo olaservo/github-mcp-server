@@ -16,6 +16,7 @@ type rootInfo struct {
 	Name  string `json:"name,omitempty"`
 	Owner string `json:"owner,omitempty"`
 	Repo  string `json:"repo,omitempty"`
+	Scope string `json:"scope,omitempty"`
 }
 
 // ListRootsTool creates a tool that lists the MCP roots configured by the client
@@ -61,6 +62,11 @@ func ListRootsTool(t translations.TranslationHelperFunc, host string) inventory.
 				if err == nil {
 					info.Owner = owner
 					info.Repo = repo
+					if repo != "" {
+						info.Scope = "repository"
+					} else {
+						info.Scope = "organization"
+					}
 				}
 				infos = append(infos, info)
 			}

@@ -22,9 +22,10 @@ type Root struct {
 
 // ParseGitHubRootURI parses a root URI to extract the GitHub owner and repo.
 // Supported formats:
-//   - https://github.com/owner/repo
-//   - https://github.com/owner/repo.git
-//   - git://github.com/owner/repo
+//   - https://github.com/owner/repo      (repo-level root)
+//   - https://github.com/owner/repo.git  (repo-level root, .git stripped)
+//   - https://github.com/owner           (org-level root, repo returned as "")
+//   - git://github.com/owner/repo        (repo-level root)
 //   - https://github.com/owner/repo/tree/main (extra path segments ignored)
 //
 // The host parameter specifies the expected GitHub host (e.g., "github.com").
@@ -59,18 +60,16 @@ func ParseGitHubRootURI(uri string, host string) (owner, repo string, err error)
 	}
 
 	segments := strings.SplitN(path, "/", 3) // at most 3: owner, repo, rest
-	if len(segments) < 2 || segments[0] == "" || segments[1] == "" {
-		return "", "", fmt.Errorf("URI %q does not contain owner/repo (expected /owner/repo)", uri)
+	if len(segments) == 0 || segments[0] == "" {
+		return "", "", fmt.Errorf("URI %q has no path", uri)
 	}
 
 	owner = segments[0]
-	repo = segments[1]
 
-	// Strip .git suffix from repo name
-	repo = strings.TrimSuffix(repo, ".git")
-
-	if repo == "" {
-		return "", "", fmt.Errorf("URI %q has empty repo name after stripping .git", uri)
+	// If there's a second segment, treat it as the repo (repo-level root).
+	// Otherwise, this is an org-level root with repo = "".
+	if len(segments) >= 2 && segments[1] != "" {
+		repo = strings.TrimSuffix(segments[1], ".git")
 	}
 
 	return owner, repo, nil

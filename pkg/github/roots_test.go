@@ -108,10 +108,25 @@ func TestParseGitHubRootURI(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "only owner no repo",
-			uri:     "https://github.com/octocat",
-			host:    "github.com",
-			wantErr: true,
+			name:      "org only",
+			uri:       "https://github.com/octocat",
+			host:      "github.com",
+			wantOwner: "octocat",
+			wantRepo:  "",
+		},
+		{
+			name:      "org only trailing slash",
+			uri:       "https://github.com/myorg/",
+			host:      "github.com",
+			wantOwner: "myorg",
+			wantRepo:  "",
+		},
+		{
+			name:      "org only enterprise",
+			uri:       "https://github.enterprise.com/myorg",
+			host:      "github.enterprise.com",
+			wantOwner: "myorg",
+			wantRepo:  "",
 		},
 		{
 			name:    "empty URI",
@@ -191,6 +206,20 @@ func TestParseGitHubRoots(t *testing.T) {
 		roots := []*mcp.Root{nil, {URI: "https://github.com/octocat/Hello-World"}}
 		result := ParseGitHubRoots(roots, "github.com")
 		require.Len(t, result, 1)
+	})
+
+	t.Run("includes org-level roots", func(t *testing.T) {
+		roots := []*mcp.Root{
+			{URI: "https://github.com/myorg", Name: "My Org"},
+			{URI: "https://github.com/octocat/Hello-World", Name: "Hello World"},
+		}
+		result := ParseGitHubRoots(roots, "github.com")
+		require.Len(t, result, 2)
+		assert.Equal(t, "myorg", result[0].Owner)
+		assert.Equal(t, "", result[0].Repo)
+		assert.Equal(t, "My Org", result[0].Name)
+		assert.Equal(t, "octocat", result[1].Owner)
+		assert.Equal(t, "Hello-World", result[1].Repo)
 	})
 
 	t.Run("empty roots", func(t *testing.T) {

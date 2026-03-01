@@ -9,8 +9,10 @@ import (
 )
 
 // RootsMiddleware returns middleware that injects owner/repo defaults from MCP roots
-// into tool call arguments. When the client has configured exactly one GitHub root
-// and a tool call is missing owner/repo, the middleware fills them in automatically.
+// into tool call arguments. It uses a priority model:
+//   - If all GitHub roots share the same owner, inject owner when missing
+//   - If exactly one repo-level root exists, also inject repo when missing
+//   - If roots span multiple owners, no injection (fully ambiguous)
 func RootsMiddleware(host string, logger *slog.Logger) mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, request mcp.Request) (mcp.Result, error) {
@@ -37,12 +39,32 @@ func RootsMiddleware(host string, logger *slog.Logger) mcp.Middleware {
 
 			// Parse GitHub roots
 			ghRoots := ParseGitHubRoots(rootsResult.Roots, host)
-			if len(ghRoots) != 1 {
-				// Either no valid GitHub roots or multiple — require explicit owner/repo
+			if len(ghRoots) == 0 {
 				return next(ctx, method, request)
 			}
 
-			root := ghRoots[0]
+			// Separate repo-level and org-level roots
+			var repoRoots []Root
+			for _, r := range ghRoots {
+				if r.Repo != "" {
+					repoRoots = append(repoRoots, r)
+				}
+			}
+
+			// Check if all roots share the same owner
+			commonOwner := ghRoots[0].Owner
+			allSameOwner := true
+			for _, r := range ghRoots[1:] {
+				if r.Owner != commonOwner {
+					allSameOwner = false
+					break
+				}
+			}
+
+			if !allSameOwner {
+				// Different orgs — fully ambiguous, no injection
+				return next(ctx, method, request)
+			}
 
 			// Unmarshal existing arguments
 			var args map[string]any
@@ -56,15 +78,19 @@ func RootsMiddleware(host string, logger *slog.Logger) mcp.Middleware {
 				args = make(map[string]any)
 			}
 
-			// Only inject if owner/repo are missing
+			// All roots share the same owner — inject it if missing
 			modified := false
 			if _, hasOwner := args["owner"]; !hasOwner {
-				args["owner"] = root.Owner
+				args["owner"] = commonOwner
 				modified = true
 			}
-			if _, hasRepo := args["repo"]; !hasRepo {
-				args["repo"] = root.Repo
-				modified = true
+
+			// Inject repo only if exactly 1 repo-level root exists
+			if len(repoRoots) == 1 {
+				if _, hasRepo := args["repo"]; !hasRepo {
+					args["repo"] = repoRoots[0].Repo
+					modified = true
+				}
 			}
 
 			if !modified {
@@ -79,8 +105,8 @@ func RootsMiddleware(host string, logger *slog.Logger) mcp.Middleware {
 			}
 			callReq.Params.Arguments = newArgs
 
-			logger.Debug("roots middleware: injected owner/repo from root",
-				"owner", root.Owner, "repo", root.Repo, "tool", callReq.Params.Name)
+			logger.Debug("roots middleware: injected defaults from roots",
+				"owner", commonOwner, "repoRoots", len(repoRoots), "tool", callReq.Params.Name)
 
 			return next(ctx, method, request)
 		}
