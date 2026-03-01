@@ -552,20 +552,22 @@ docker run -i --rm \
 
 ### MCP Roots (Insiders)
 
-When running in insiders mode, the server supports [MCP roots](https://modelcontextprotocol.io/docs/concepts/roots) to scope tool operations to specific GitHub organizations or repositories. If your MCP client sends roots like `https://github.com/myorg` or `https://github.com/myorg/myrepo`, the server provides two behaviors:
+When running in insiders mode, the server supports [MCP roots](https://modelcontextprotocol.io/docs/concepts/roots) to scope tool operations to specific GitHub organizations or repositories. If your MCP client sends roots like `https://github.com/myorg` or `https://github.com/myorg/myrepo`, the server provides three layers:
 
 **Context:** The `list_roots` tool (insiders-only) shows which roots are active and their parsed scope, so the LLM can see what's in scope before making tool calls.
 
-**Enforcement:** The server validates that `owner` and `repo` arguments in tool calls match at least one configured root. Out-of-scope calls are rejected with an error visible to the LLM.
+**Injection:** When roots are configured, `owner` and `repo` become optional in tool schemas. If the LLM omits them, the server fills in defaults from roots — the common owner is injected when all roots share one, and the repo is injected when exactly one repo-level root exists. Injected values always come from roots, so they are inherently valid.
 
-| Roots configured | Enforcement behavior |
-|-----------------|----------------------|
-| `https://github.com/org` | Any repo under `org` is allowed |
-| `https://github.com/org/repo` | Only `org/repo` is allowed |
-| `org` + `org/repo` | Any repo under `org` (org root grants broad access) |
-| `org/repo-a` + `org/repo-b` | Only `repo-a` and `repo-b` under `org` |
-| `org-a/...` + `org-b/...` | Each owner's repos validated independently |
-| No roots configured | No enforcement (all calls pass through) |
+**Enforcement:** The server validates that `owner` and `repo` arguments in tool calls match at least one configured root. Out-of-scope calls are rejected with an error visible to the LLM. Enforcement runs before injection, so explicit wrong values are rejected before injection can run.
+
+| Roots configured | Injection behavior | Enforcement behavior |
+|-----------------|-------------------|----------------------|
+| `https://github.com/org/repo` | Injects owner + repo when omitted | Only `org/repo` is allowed |
+| `https://github.com/org` | Injects owner only | Any repo under `org` is allowed |
+| `org` + `org/repo` | Injects owner + repo (single repo root) | Any repo under `org` (org root grants broad access) |
+| `org/repo-a` + `org/repo-b` | Injects owner only (ambiguous repo) | Only `repo-a` and `repo-b` under `org` |
+| `org-a/...` + `org-b/...` | No injection (ambiguous owner) | Each owner's repos validated independently |
+| No roots configured | No injection | No enforcement (all calls pass through) |
 
 > **Note:** Roots enforcement protects against LLM-driven scope creep (e.g., prompt injection steering the agent to access repos outside the intended scope). For access control at the API level, also use appropriately scoped tokens such as [fine-grained personal access tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#fine-grained-personal-access-tokens) limited to specific repositories.
 
