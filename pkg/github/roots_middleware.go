@@ -13,6 +13,12 @@ import (
 //   - If all GitHub roots share the same owner, inject owner when missing
 //   - If exactly one repo-level root exists, also inject repo when missing
 //   - If roots span multiple owners, no injection (fully ambiguous)
+//
+// IMPORTANT: This middleware is a convenience layer, not a security boundary.
+// It provides default values for missing parameters but does NOT restrict access.
+// Tool calls with explicit owner/repo arguments bypass roots entirely — any
+// repository accessible by the configured token can still be targeted.
+// For access control, use appropriately scoped tokens (e.g., fine-grained PATs).
 func RootsMiddleware(host string, logger *slog.Logger) mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, request mcp.Request) (mcp.Result, error) {
@@ -105,8 +111,13 @@ func RootsMiddleware(host string, logger *slog.Logger) mcp.Middleware {
 			}
 			callReq.Params.Arguments = newArgs
 
-			logger.Debug("roots middleware: injected defaults from roots",
-				"owner", commonOwner, "repoRoots", len(repoRoots), "tool", callReq.Params.Name)
+			// Log at Info level so auto-injection is visible, especially for
+			// write operations where silently targeting a repo could be surprising.
+			logAttrs := []any{"tool", callReq.Params.Name, "owner", commonOwner}
+			if len(repoRoots) == 1 {
+				logAttrs = append(logAttrs, "repo", repoRoots[0].Repo)
+			}
+			logger.Info("roots middleware: injected defaults from roots", logAttrs...)
 
 			return next(ctx, method, request)
 		}

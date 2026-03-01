@@ -38,42 +38,42 @@ func TestParseGitHubRootURI(t *testing.T) {
 			uri:       "https://github.com/octocat/Hello-World",
 			host:      "github.com",
 			wantOwner: "octocat",
-			wantRepo:  "Hello-World",
+			wantRepo:  "hello-world",
 		},
 		{
 			name:      "git protocol",
 			uri:       "git://github.com/octocat/Hello-World",
 			host:      "github.com",
 			wantOwner: "octocat",
-			wantRepo:  "Hello-World",
+			wantRepo:  "hello-world",
 		},
 		{
 			name:      "https with .git suffix",
 			uri:       "https://github.com/octocat/Hello-World.git",
 			host:      "github.com",
 			wantOwner: "octocat",
-			wantRepo:  "Hello-World",
+			wantRepo:  "hello-world",
 		},
 		{
 			name:      "trailing slash",
 			uri:       "https://github.com/octocat/Hello-World/",
 			host:      "github.com",
 			wantOwner: "octocat",
-			wantRepo:  "Hello-World",
+			wantRepo:  "hello-world",
 		},
 		{
 			name:      "extra path segments",
 			uri:       "https://github.com/octocat/Hello-World/tree/main",
 			host:      "github.com",
 			wantOwner: "octocat",
-			wantRepo:  "Hello-World",
+			wantRepo:  "hello-world",
 		},
 		{
 			name:      "default host when empty",
 			uri:       "https://github.com/octocat/Hello-World",
 			host:      "",
 			wantOwner: "octocat",
-			wantRepo:  "Hello-World",
+			wantRepo:  "hello-world",
 		},
 		{
 			name:      "GitHub Enterprise",
@@ -87,7 +87,7 @@ func TestParseGitHubRootURI(t *testing.T) {
 			uri:       "https://GitHub.com/octocat/Hello-World",
 			host:      "github.com",
 			wantOwner: "octocat",
-			wantRepo:  "Hello-World",
+			wantRepo:  "hello-world",
 		},
 		{
 			name:    "wrong host",
@@ -151,14 +151,21 @@ func TestParseGitHubRootURI(t *testing.T) {
 			uri:       "http://github.com/octocat/Hello-World",
 			host:      "github.com",
 			wantOwner: "octocat",
-			wantRepo:  "Hello-World",
+			wantRepo:  "hello-world",
 		},
 		{
 			name:      "git with .git suffix",
 			uri:       "git://github.com/octocat/Hello-World.git",
 			host:      "github.com",
 			wantOwner: "octocat",
-			wantRepo:  "Hello-World",
+			wantRepo:  "hello-world",
+		},
+		{
+			name:      "mixed case owner and repo normalized",
+			uri:       "https://github.com/OctoCat/My-Repo",
+			host:      "github.com",
+			wantOwner: "octocat",
+			wantRepo:  "my-repo",
 		},
 	}
 
@@ -185,7 +192,7 @@ func TestParseGitHubRoots(t *testing.T) {
 		result := ParseGitHubRoots(roots, "github.com")
 		require.Len(t, result, 2)
 		assert.Equal(t, "octocat", result[0].Owner)
-		assert.Equal(t, "Hello-World", result[0].Repo)
+		assert.Equal(t, "hello-world", result[0].Repo)
 		assert.Equal(t, "Hello World", result[0].Name)
 		assert.Equal(t, "myorg", result[1].Owner)
 		assert.Equal(t, "myrepo", result[1].Repo)
@@ -219,7 +226,7 @@ func TestParseGitHubRoots(t *testing.T) {
 		assert.Equal(t, "", result[0].Repo)
 		assert.Equal(t, "My Org", result[0].Name)
 		assert.Equal(t, "octocat", result[1].Owner)
-		assert.Equal(t, "Hello-World", result[1].Repo)
+		assert.Equal(t, "hello-world", result[1].Repo)
 	})
 
 	t.Run("empty roots", func(t *testing.T) {

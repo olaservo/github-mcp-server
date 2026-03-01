@@ -114,7 +114,7 @@ func TestRootsMiddleware_Integration(t *testing.T) {
 		var args map[string]any
 		require.NoError(t, json.Unmarshal([]byte(text), &args))
 		assert.Equal(t, "octocat", args["owner"])
-		assert.Equal(t, "Hello-World", args["repo"])
+		assert.Equal(t, "hello-world", args["repo"])
 		assert.Equal(t, "open", args["state"])
 	})
 
@@ -511,6 +511,68 @@ func TestRootsMiddleware_MultipleOrgs(t *testing.T) {
 	// Explicit values should be preserved, no injection
 	assert.Equal(t, "org-a", args["owner"])
 	assert.Equal(t, "repo", args["repo"])
+}
+
+func TestRootsMiddleware_MixedCaseSameOrg(t *testing.T) {
+	// Mixed-case owner names should be treated as the same org (GitHub is case-insensitive)
+	clientTransport, serverTransport := mcp.NewInMemoryTransports()
+
+	server := mcp.NewServer(&mcp.Implementation{
+		Name:    "test-server",
+		Version: "0.1.0",
+	}, nil)
+
+	server.AddReceivingMiddleware(RootsMiddleware("github.com", testLogger()))
+
+	server.AddTool(&mcp.Tool{
+		Name:        "echo_args",
+		Description: "Echoes back arguments",
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
+	}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: string(req.Params.Arguments)},
+			},
+		}, nil
+	})
+
+	ctx := context.Background()
+
+	serverSession, err := server.Connect(ctx, serverTransport, nil)
+	require.NoError(t, err)
+	defer serverSession.Close()
+
+	client := mcp.NewClient(&mcp.Implementation{
+		Name:    "test-client",
+		Version: "0.1.0",
+	}, nil)
+	// Mixed case: "MyOrg" and "myorg" should be treated as the same owner
+	client.AddRoots(
+		&mcp.Root{URI: "https://github.com/MyOrg/Repo-A"},
+		&mcp.Root{URI: "https://github.com/myorg/repo-b"},
+	)
+
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	require.NoError(t, err)
+	defer clientSession.Close()
+
+	result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "echo_args",
+		Arguments: map[string]any{"state": "open"},
+	})
+	require.NoError(t, err)
+	require.Len(t, result.Content, 1)
+
+	text := result.Content[0].(*mcp.TextContent).Text
+	var args map[string]any
+	require.NoError(t, json.Unmarshal([]byte(text), &args))
+	// Both are same org after normalization — owner should be injected
+	assert.Equal(t, "myorg", args["owner"])
+	// Two repo roots — repo should NOT be injected (ambiguous)
+	assert.Nil(t, args["repo"])
 }
 
 func TestRootsMiddleware_NoRoots(t *testing.T) {
