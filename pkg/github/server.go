@@ -107,7 +107,7 @@ func NewMCPServer(ctx context.Context, cfg *MCPServerConfig, deps ToolDependenci
 	// and any middleware that needs to read or modify the context should be before it.
 	ghServer.AddReceivingMiddleware(middleware...)
 	if cfg.InsidersMode {
-		ghServer.AddReceivingMiddleware(RootsMiddleware(cfg.Host, cfg.Logger))
+		ghServer.AddReceivingMiddleware(RootsEnforcementMiddleware(cfg.Host, cfg.Logger))
 	}
 	ghServer.AddReceivingMiddleware(InjectDepsMiddleware(deps))
 	ghServer.AddReceivingMiddleware(addGitHubAPIErrorToContext)
