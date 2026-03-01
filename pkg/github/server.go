@@ -108,6 +108,7 @@ func NewMCPServer(ctx context.Context, cfg *MCPServerConfig, deps ToolDependenci
 	ghServer.AddReceivingMiddleware(middleware...)
 	if cfg.InsidersMode {
 		ghServer.AddReceivingMiddleware(RootsEnforcementMiddleware(cfg.Host, cfg.Logger))
+		ghServer.AddReceivingMiddleware(RootsInjectionMiddleware(cfg.Host, cfg.Logger))
 	}
 	ghServer.AddReceivingMiddleware(InjectDepsMiddleware(deps))
 	ghServer.AddReceivingMiddleware(addGitHubAPIErrorToContext)
