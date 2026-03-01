@@ -552,22 +552,22 @@ docker run -i --rm \
 
 ### MCP Roots (Insiders)
 
-When running in insiders mode, the server supports [MCP roots](https://modelcontextprotocol.io/docs/concepts/roots) to automatically scope tool operations to specific GitHub organizations or repositories. If your MCP client sends roots like `https://github.com/myorg` or `https://github.com/myorg/myrepo`, the server will use them as defaults for `owner` and `repo` parameters.
+When running in insiders mode, the server supports [MCP roots](https://modelcontextprotocol.io/docs/concepts/roots) to scope tool operations to specific GitHub organizations or repositories. If your MCP client sends roots like `https://github.com/myorg` or `https://github.com/myorg/myrepo`, the server provides two behaviors:
 
-**How injection works:**
+**Context:** The `list_roots` tool (insiders-only) shows which roots are active and their parsed scope, so the LLM can see what's in scope before making tool calls.
 
-| Roots configured | `owner` injected | `repo` injected |
-|-----------------|-------------------|-----------------|
-| `https://github.com/org` | Yes | No |
-| `https://github.com/org/repo` | Yes | Yes |
-| `org` + `org/repo` | Yes | Yes (repo root wins) |
-| `org/repo-a` + `org/repo-b` | Yes | No (ambiguous) |
-| `org-a/...` + `org-b/...` | No | No (ambiguous) |
+**Enforcement:** The server validates that `owner` and `repo` arguments in tool calls match at least one configured root. Out-of-scope calls are rejected with an error visible to the LLM.
 
-- The `list_roots` tool (insiders-only) shows which roots are active and their parsed scope.
-- Explicit `owner`/`repo` arguments in tool calls always take precedence over root defaults.
+| Roots configured | Enforcement behavior |
+|-----------------|----------------------|
+| `https://github.com/org` | Any repo under `org` is allowed |
+| `https://github.com/org/repo` | Only `org/repo` is allowed |
+| `org` + `org/repo` | Any repo under `org` (org root grants broad access) |
+| `org/repo-a` + `org/repo-b` | Only `repo-a` and `repo-b` under `org` |
+| `org-a/...` + `org-b/...` | Each owner's repos validated independently |
+| No roots configured | No enforcement (all calls pass through) |
 
-> **Note:** Roots are a convenience feature that provides default parameter values — they are not a security boundary. Tool calls with explicit `owner` and `repo` arguments bypass roots entirely, meaning any repository accessible by the configured token can still be targeted. For access control, use appropriately scoped tokens such as [fine-grained personal access tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#fine-grained-personal-access-tokens) limited to specific repositories.
+> **Note:** Roots enforcement protects against LLM-driven scope creep (e.g., prompt injection steering the agent to access repos outside the intended scope). For access control at the API level, also use appropriately scoped tokens such as [fine-grained personal access tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#fine-grained-personal-access-tokens) limited to specific repositories.
 
 ### Available Toolsets
 

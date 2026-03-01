@@ -130,7 +130,7 @@ func NewStdioMCPServer(ctx context.Context, cfg github.MCPServerConfig) (*mcp.Se
 		featureChecker,
 	)
 	// Build and register the tool/resource/prompt inventory
-	inventoryBuilder := github.NewInventory(cfg.Translator, github.WithHost(cfg.Host), github.WithRootsMode(cfg.InsidersMode)).
+	inventoryBuilder := github.NewInventory(cfg.Translator, github.WithHost(cfg.Host)).
 		WithDeprecatedAliases(github.DeprecatedToolAliases).
 		WithReadOnly(cfg.ReadOnly).
 		WithToolsets(github.ResolvedEnabledToolsets(cfg.DynamicToolsets, cfg.EnabledToolsets, cfg.EnabledTools)).

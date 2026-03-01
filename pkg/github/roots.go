@@ -2,13 +2,9 @@ package github
 
 import (
 	"fmt"
-	"maps"
 	"net/url"
-	"slices"
 	"strings"
 
-	"github.com/github/github-mcp-server/pkg/inventory"
-	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -95,61 +91,6 @@ func ParseGitHubRoots(roots []*mcp.Root, host string) []Root {
 			URI:   root.URI,
 			Name:  root.Name,
 		})
-	}
-	return result
-}
-
-// MakeOwnerRepoOptional creates copies of tools with "owner" and "repo"
-// removed from the Required list in their InputSchema.
-// This is used in roots mode where owner/repo can be inferred from configured roots.
-func MakeOwnerRepoOptional(tools []inventory.ServerTool) []inventory.ServerTool {
-	result := make([]inventory.ServerTool, len(tools))
-	for i, tool := range tools {
-		result[i] = tool
-
-		schema, ok := tool.Tool.InputSchema.(*jsonschema.Schema)
-		if !ok || schema == nil {
-			continue
-		}
-
-		hasOwner := slices.Contains(schema.Required, "owner")
-		hasRepo := slices.Contains(schema.Required, "repo")
-		if !hasOwner && !hasRepo {
-			continue
-		}
-
-		// Make shallow copies to avoid mutating originals
-		toolCopy := tool
-		schemaCopy := *schema
-
-		// Filter out "owner" and "repo" from Required
-		newRequired := make([]string, 0, len(schemaCopy.Required))
-		for _, r := range schemaCopy.Required {
-			if r != "owner" && r != "repo" {
-				newRequired = append(newRequired, r)
-			}
-		}
-		schemaCopy.Required = newRequired
-
-		// Update property descriptions to indicate they default from roots
-		if schemaCopy.Properties != nil {
-			newProps := make(map[string]*jsonschema.Schema, len(schemaCopy.Properties))
-			maps.Copy(newProps, schemaCopy.Properties)
-			if ownerProp, exists := newProps["owner"]; exists && ownerProp != nil {
-				propCopy := *ownerProp
-				propCopy.Description += " (optional when roots are configured)"
-				newProps["owner"] = &propCopy
-			}
-			if repoProp, exists := newProps["repo"]; exists && repoProp != nil {
-				propCopy := *repoProp
-				propCopy.Description += " (optional when roots are configured)"
-				newProps["repo"] = &propCopy
-			}
-			schemaCopy.Properties = newProps
-		}
-
-		toolCopy.Tool.InputSchema = &schemaCopy
-		result[i] = toolCopy
 	}
 	return result
 }

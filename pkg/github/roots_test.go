@@ -4,9 +4,7 @@ import (
 	"testing"
 
 	"github.com/github/github-mcp-server/internal/toolsnaps"
-	"github.com/github/github-mcp-server/pkg/inventory"
 	"github.com/github/github-mcp-server/pkg/translations"
-	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -235,103 +233,3 @@ func TestParseGitHubRoots(t *testing.T) {
 	})
 }
 
-func TestMakeOwnerRepoOptional(t *testing.T) {
-	t.Run("removes owner and repo from required", func(t *testing.T) {
-		tools := []inventory.ServerTool{
-			{
-				Tool: mcp.Tool{
-					Name: "list_issues",
-					InputSchema: &jsonschema.Schema{
-						Type: "object",
-						Properties: map[string]*jsonschema.Schema{
-							"owner": {Type: "string", Description: "Repository owner"},
-							"repo":  {Type: "string", Description: "Repository name"},
-							"state": {Type: "string"},
-						},
-						Required: []string{"owner", "repo"},
-					},
-				},
-			},
-		}
-		result := MakeOwnerRepoOptional(tools)
-		require.Len(t, result, 1)
-
-		schema := result[0].Tool.InputSchema.(*jsonschema.Schema)
-		assert.Empty(t, schema.Required)
-		assert.Contains(t, schema.Properties["owner"].Description, "optional when roots are configured")
-		assert.Contains(t, schema.Properties["repo"].Description, "optional when roots are configured")
-	})
-
-	t.Run("preserves other required fields", func(t *testing.T) {
-		tools := []inventory.ServerTool{
-			{
-				Tool: mcp.Tool{
-					Name: "get_commit",
-					InputSchema: &jsonschema.Schema{
-						Type:     "object",
-						Required: []string{"owner", "repo", "sha"},
-					},
-				},
-			},
-		}
-		result := MakeOwnerRepoOptional(tools)
-		schema := result[0].Tool.InputSchema.(*jsonschema.Schema)
-		assert.Equal(t, []string{"sha"}, schema.Required)
-	})
-
-	t.Run("does not modify tools without owner/repo", func(t *testing.T) {
-		tools := []inventory.ServerTool{
-			{
-				Tool: mcp.Tool{
-					Name: "get_me",
-					InputSchema: &jsonschema.Schema{
-						Type:     "object",
-						Required: []string{},
-					},
-				},
-			},
-		}
-		result := MakeOwnerRepoOptional(tools)
-		schema := result[0].Tool.InputSchema.(*jsonschema.Schema)
-		assert.Empty(t, schema.Required)
-	})
-
-	t.Run("does not mutate original tools", func(t *testing.T) {
-		original := []inventory.ServerTool{
-			{
-				Tool: mcp.Tool{
-					Name: "list_issues",
-					InputSchema: &jsonschema.Schema{
-						Type: "object",
-						Properties: map[string]*jsonschema.Schema{
-							"owner": {Type: "string", Description: "Repository owner"},
-							"repo":  {Type: "string", Description: "Repository name"},
-						},
-						Required: []string{"owner", "repo"},
-					},
-				},
-			},
-		}
-		_ = MakeOwnerRepoOptional(original)
-
-		// Original should be unchanged
-		schema := original[0].Tool.InputSchema.(*jsonschema.Schema)
-		assert.Equal(t, []string{"owner", "repo"}, schema.Required)
-		assert.Equal(t, "Repository owner", schema.Properties["owner"].Description)
-	})
-
-	t.Run("skips tools with non-jsonschema InputSchema", func(t *testing.T) {
-		tools := []inventory.ServerTool{
-			{
-				Tool: mcp.Tool{
-					Name:        "raw_tool",
-					InputSchema: map[string]any{"type": "object"},
-				},
-			},
-		}
-		result := MakeOwnerRepoOptional(tools)
-		require.Len(t, result, 1)
-		// Should pass through unchanged
-		assert.Equal(t, tools[0].Tool.InputSchema, result[0].Tool.InputSchema)
-	})
-}

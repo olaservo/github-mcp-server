@@ -16,9 +16,6 @@ func NewInventory(t translations.TranslationHelperFunc, opts ...InventoryOption)
 		opt(&cfg)
 	}
 	tools := AllTools(t, cfg.host)
-	if cfg.rootsMode {
-		tools = MakeOwnerRepoOptional(tools)
-	}
 	return inventory.NewBuilder().
 		SetTools(tools).
 		SetResources(AllResources(t)).
@@ -27,8 +24,7 @@ func NewInventory(t translations.TranslationHelperFunc, opts ...InventoryOption)
 
 // inventoryConfig holds configuration options for building the inventory.
 type inventoryConfig struct {
-	host      string
-	rootsMode bool
+	host string
 }
 
 // InventoryOption configures inventory building.
@@ -37,9 +33,4 @@ type InventoryOption func(*inventoryConfig)
 // WithHost sets the GitHub host for tool configuration.
 func WithHost(host string) InventoryOption {
 	return func(c *inventoryConfig) { c.host = host }
-}
-
-// WithRootsMode enables roots mode, making owner/repo optional in tool schemas.
-func WithRootsMode(enabled bool) InventoryOption {
-	return func(c *inventoryConfig) { c.rootsMode = enabled }
 }

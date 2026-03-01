@@ -16,8 +16,10 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 }
 
-func TestRootsMiddleware_PassthroughNonToolsCall(t *testing.T) {
-	middleware := RootsMiddleware("github.com", testLogger())
+// --- RootsEnforcementMiddleware tests ---
+
+func TestRootsEnforcementMiddleware_PassthroughNonToolsCall(t *testing.T) {
+	middleware := RootsEnforcementMiddleware("github.com", testLogger())
 	called := false
 	next := func(_ context.Context, _ string, _ mcp.Request) (mcp.Result, error) {
 		called = true
@@ -30,8 +32,8 @@ func TestRootsMiddleware_PassthroughNonToolsCall(t *testing.T) {
 	assert.True(t, called, "next handler should be called for non-tools/call methods")
 }
 
-func TestRootsMiddleware_PassthroughNilSession(t *testing.T) {
-	middleware := RootsMiddleware("github.com", testLogger())
+func TestRootsEnforcementMiddleware_PassthroughNilSession(t *testing.T) {
+	middleware := RootsEnforcementMiddleware("github.com", testLogger())
 	called := false
 	next := func(_ context.Context, _ string, _ mcp.Request) (mcp.Result, error) {
 		called = true
@@ -39,7 +41,6 @@ func TestRootsMiddleware_PassthroughNilSession(t *testing.T) {
 	}
 	handler := middleware(next)
 
-	// Create a CallToolRequest with nil session
 	req := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{
 			Name:      "list_issues",
@@ -51,583 +52,260 @@ func TestRootsMiddleware_PassthroughNilSession(t *testing.T) {
 	assert.True(t, called, "next handler should be called when session is nil")
 }
 
-func TestRootsMiddleware_Integration(t *testing.T) {
-	// Create an in-memory client-server pair to test the full middleware flow.
-	// The client configures roots, the server middleware reads them and injects owner/repo.
-	clientTransport, serverTransport := mcp.NewInMemoryTransports()
+func TestRootsEnforcementMiddleware_Integration(t *testing.T) {
+	// Helper to set up server + client with enforcement middleware
+	setup := func(t *testing.T, roots ...*mcp.Root) (*mcp.ClientSession, func()) {
+		t.Helper()
+		clientTransport, serverTransport := mcp.NewInMemoryTransports()
 
-	// Set up server with a test tool and the roots middleware
-	server := mcp.NewServer(&mcp.Implementation{
-		Name:    "test-server",
-		Version: "0.1.0",
-	}, nil)
+		server := mcp.NewServer(&mcp.Implementation{
+			Name:    "test-server",
+			Version: "0.1.0",
+		}, nil)
 
-	logger := testLogger()
-	server.AddReceivingMiddleware(RootsMiddleware("github.com", logger))
+		server.AddReceivingMiddleware(RootsEnforcementMiddleware("github.com", testLogger()))
 
-	// Add a test tool that echoes back its arguments
-	server.AddTool(&mcp.Tool{
-		Name:        "echo_args",
-		Description: "Echoes back arguments",
-		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		},
-	}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{Text: string(req.Params.Arguments)},
+		// Echo tool returns arguments back as text
+		server.AddTool(&mcp.Tool{
+			Name:        "echo_args",
+			Description: "Echoes back arguments",
+			InputSchema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
 			},
-		}, nil
-	})
+		}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			return &mcp.CallToolResult{
+				Content: []mcp.Content{
+					&mcp.TextContent{Text: string(req.Params.Arguments)},
+				},
+			}, nil
+		})
 
-	ctx := context.Background()
+		ctx := context.Background()
 
-	// Connect server
-	serverSession, err := server.Connect(ctx, serverTransport, nil)
-	require.NoError(t, err)
-	defer serverSession.Close()
+		serverSession, err := server.Connect(ctx, serverTransport, nil)
+		require.NoError(t, err)
 
-	// Create client with a root configured
-	client := mcp.NewClient(&mcp.Implementation{
-		Name:    "test-client",
-		Version: "0.1.0",
-	}, nil)
-	client.AddRoots(&mcp.Root{
-		URI:  "https://github.com/octocat/Hello-World",
-		Name: "Hello World repo",
-	})
+		client := mcp.NewClient(&mcp.Implementation{
+			Name:    "test-client",
+			Version: "0.1.0",
+		}, nil)
+		if len(roots) > 0 {
+			client.AddRoots(roots...)
+		}
 
-	clientSession, err := client.Connect(ctx, clientTransport, nil)
-	require.NoError(t, err)
-	defer clientSession.Close()
+		clientSession, err := client.Connect(ctx, clientTransport, nil)
+		require.NoError(t, err)
 
-	t.Run("injects owner/repo when missing", func(t *testing.T) {
-		result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		cleanup := func() {
+			clientSession.Close()
+			serverSession.Close()
+		}
+		return clientSession, cleanup
+	}
+
+	t.Run("allows tool call within single repo root", func(t *testing.T) {
+		clientSession, cleanup := setup(t,
+			&mcp.Root{URI: "https://github.com/octocat/Hello-World"},
+		)
+		defer cleanup()
+
+		result, err := clientSession.CallTool(context.Background(), &mcp.CallToolParams{
 			Name:      "echo_args",
-			Arguments: map[string]any{"state": "open"},
+			Arguments: map[string]any{"owner": "octocat", "repo": "Hello-World"},
 		})
 		require.NoError(t, err)
 		require.Len(t, result.Content, 1)
+		assert.False(t, result.IsError)
 
 		text := result.Content[0].(*mcp.TextContent).Text
 		var args map[string]any
 		require.NoError(t, json.Unmarshal([]byte(text), &args))
 		assert.Equal(t, "octocat", args["owner"])
-		assert.Equal(t, "hello-world", args["repo"])
-		assert.Equal(t, "open", args["state"])
+		assert.Equal(t, "Hello-World", args["repo"])
 	})
 
-	t.Run("does not override explicit owner/repo", func(t *testing.T) {
-		result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
-			Name: "echo_args",
-			Arguments: map[string]any{
-				"owner": "myorg",
-				"repo":  "myrepo",
-			},
-		})
-		require.NoError(t, err)
-		require.Len(t, result.Content, 1)
+	t.Run("rejects tool call outside repo root", func(t *testing.T) {
+		clientSession, cleanup := setup(t,
+			&mcp.Root{URI: "https://github.com/octocat/Hello-World"},
+		)
+		defer cleanup()
 
-		text := result.Content[0].(*mcp.TextContent).Text
-		var args map[string]any
-		require.NoError(t, json.Unmarshal([]byte(text), &args))
-		assert.Equal(t, "myorg", args["owner"])
-		assert.Equal(t, "myrepo", args["repo"])
-	})
-}
-
-func TestRootsMiddleware_MultipleRoots(t *testing.T) {
-	// When multiple roots from different orgs are configured, middleware should NOT inject owner/repo
-	clientTransport, serverTransport := mcp.NewInMemoryTransports()
-
-	server := mcp.NewServer(&mcp.Implementation{
-		Name:    "test-server",
-		Version: "0.1.0",
-	}, nil)
-
-	server.AddReceivingMiddleware(RootsMiddleware("github.com", testLogger()))
-
-	server.AddTool(&mcp.Tool{
-		Name:        "echo_args",
-		Description: "Echoes back arguments",
-		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		},
-	}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{Text: string(req.Params.Arguments)},
-			},
-		}, nil
-	})
-
-	ctx := context.Background()
-
-	serverSession, err := server.Connect(ctx, serverTransport, nil)
-	require.NoError(t, err)
-	defer serverSession.Close()
-
-	client := mcp.NewClient(&mcp.Implementation{
-		Name:    "test-client",
-		Version: "0.1.0",
-	}, nil)
-	// Add multiple GitHub roots
-	client.AddRoots(
-		&mcp.Root{URI: "https://github.com/octocat/Hello-World"},
-		&mcp.Root{URI: "https://github.com/myorg/myrepo"},
-	)
-
-	clientSession, err := client.Connect(ctx, clientTransport, nil)
-	require.NoError(t, err)
-	defer clientSession.Close()
-
-	result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "echo_args",
-		Arguments: map[string]any{"state": "open"},
-	})
-	require.NoError(t, err)
-	require.Len(t, result.Content, 1)
-
-	text := result.Content[0].(*mcp.TextContent).Text
-	var args map[string]any
-	require.NoError(t, json.Unmarshal([]byte(text), &args))
-	// With multiple roots, owner/repo should NOT be injected
-	assert.Nil(t, args["owner"])
-	assert.Nil(t, args["repo"])
-	assert.Equal(t, "open", args["state"])
-}
-
-func TestRootsMiddleware_OrgRoot(t *testing.T) {
-	// When an org-only root is configured, middleware should inject owner only
-	clientTransport, serverTransport := mcp.NewInMemoryTransports()
-
-	server := mcp.NewServer(&mcp.Implementation{
-		Name:    "test-server",
-		Version: "0.1.0",
-	}, nil)
-
-	server.AddReceivingMiddleware(RootsMiddleware("github.com", testLogger()))
-
-	server.AddTool(&mcp.Tool{
-		Name:        "echo_args",
-		Description: "Echoes back arguments",
-		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		},
-	}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{Text: string(req.Params.Arguments)},
-			},
-		}, nil
-	})
-
-	ctx := context.Background()
-
-	serverSession, err := server.Connect(ctx, serverTransport, nil)
-	require.NoError(t, err)
-	defer serverSession.Close()
-
-	client := mcp.NewClient(&mcp.Implementation{
-		Name:    "test-client",
-		Version: "0.1.0",
-	}, nil)
-	client.AddRoots(&mcp.Root{
-		URI:  "https://github.com/myorg",
-		Name: "My Org",
-	})
-
-	clientSession, err := client.Connect(ctx, clientTransport, nil)
-	require.NoError(t, err)
-	defer clientSession.Close()
-
-	t.Run("injects owner only", func(t *testing.T) {
-		result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+		result, err := clientSession.CallTool(context.Background(), &mcp.CallToolParams{
 			Name:      "echo_args",
-			Arguments: map[string]any{"repo": "specific-repo"},
+			Arguments: map[string]any{"owner": "evil-org", "repo": "secret-repo"},
 		})
 		require.NoError(t, err)
-		require.Len(t, result.Content, 1)
-
+		require.True(t, result.IsError)
 		text := result.Content[0].(*mcp.TextContent).Text
-		var args map[string]any
-		require.NoError(t, json.Unmarshal([]byte(text), &args))
-		assert.Equal(t, "myorg", args["owner"])
-		assert.Equal(t, "specific-repo", args["repo"])
+		assert.Contains(t, text, "root enforcement")
+		assert.Contains(t, text, "evil-org")
 	})
 
-	t.Run("does not inject repo", func(t *testing.T) {
-		result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
+	t.Run("rejects wrong repo for same owner", func(t *testing.T) {
+		clientSession, cleanup := setup(t,
+			&mcp.Root{URI: "https://github.com/myorg/repo-a"},
+		)
+		defer cleanup()
+
+		result, err := clientSession.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "echo_args",
+			Arguments: map[string]any{"owner": "myorg", "repo": "repo-b"},
+		})
+		require.NoError(t, err)
+		require.True(t, result.IsError)
+		text := result.Content[0].(*mcp.TextContent).Text
+		assert.Contains(t, text, "root enforcement")
+		assert.Contains(t, text, "repo-b")
+	})
+
+	t.Run("allows any repo under org-level root", func(t *testing.T) {
+		clientSession, cleanup := setup(t,
+			&mcp.Root{URI: "https://github.com/myorg"},
+		)
+		defer cleanup()
+
+		result, err := clientSession.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "echo_args",
+			Arguments: map[string]any{"owner": "myorg", "repo": "any-repo"},
+		})
+		require.NoError(t, err)
+		assert.False(t, result.IsError)
+	})
+
+	t.Run("rejects wrong owner even with org root", func(t *testing.T) {
+		clientSession, cleanup := setup(t,
+			&mcp.Root{URI: "https://github.com/myorg"},
+		)
+		defer cleanup()
+
+		result, err := clientSession.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "echo_args",
+			Arguments: map[string]any{"owner": "other-org", "repo": "repo"},
+		})
+		require.NoError(t, err)
+		require.True(t, result.IsError)
+		assert.Contains(t, result.Content[0].(*mcp.TextContent).Text, "other-org")
+	})
+
+	t.Run("org root plus repo root enforcement", func(t *testing.T) {
+		clientSession, cleanup := setup(t,
+			&mcp.Root{URI: "https://github.com/myorg"},
+			&mcp.Root{URI: "https://github.com/myorg/main-app"},
+		)
+		defer cleanup()
+
+		// Allowed: any repo under the org
+		result, err := clientSession.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "echo_args",
+			Arguments: map[string]any{"owner": "myorg", "repo": "any-repo"},
+		})
+		require.NoError(t, err)
+		assert.False(t, result.IsError)
+	})
+
+	t.Run("multiple repo roots same owner allows listed repos", func(t *testing.T) {
+		clientSession, cleanup := setup(t,
+			&mcp.Root{URI: "https://github.com/myorg/repo-a"},
+			&mcp.Root{URI: "https://github.com/myorg/repo-b"},
+		)
+		defer cleanup()
+
+		// repo-a allowed
+		result, err := clientSession.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "echo_args",
+			Arguments: map[string]any{"owner": "myorg", "repo": "repo-a"},
+		})
+		require.NoError(t, err)
+		assert.False(t, result.IsError)
+
+		// repo-b allowed
+		result, err = clientSession.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "echo_args",
+			Arguments: map[string]any{"owner": "myorg", "repo": "repo-b"},
+		})
+		require.NoError(t, err)
+		assert.False(t, result.IsError)
+
+		// repo-c rejected
+		result, err = clientSession.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "echo_args",
+			Arguments: map[string]any{"owner": "myorg", "repo": "repo-c"},
+		})
+		require.NoError(t, err)
+		require.True(t, result.IsError)
+	})
+
+	t.Run("no roots means no enforcement", func(t *testing.T) {
+		clientSession, cleanup := setup(t) // no roots
+		defer cleanup()
+
+		result, err := clientSession.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "echo_args",
+			Arguments: map[string]any{"owner": "any-org", "repo": "any-repo"},
+		})
+		require.NoError(t, err)
+		assert.False(t, result.IsError)
+	})
+
+	t.Run("tool without owner/repo passes through", func(t *testing.T) {
+		clientSession, cleanup := setup(t,
+			&mcp.Root{URI: "https://github.com/myorg/myrepo"},
+		)
+		defer cleanup()
+
+		result, err := clientSession.CallTool(context.Background(), &mcp.CallToolParams{
 			Name:      "echo_args",
 			Arguments: map[string]any{"state": "open"},
 		})
 		require.NoError(t, err)
-		require.Len(t, result.Content, 1)
-
-		text := result.Content[0].(*mcp.TextContent).Text
-		var args map[string]any
-		require.NoError(t, json.Unmarshal([]byte(text), &args))
-		assert.Equal(t, "myorg", args["owner"])
-		assert.Nil(t, args["repo"]) // repo should NOT be injected for org-only root
-	})
-}
-
-func TestRootsMiddleware_OrgPlusRepoRoot(t *testing.T) {
-	// Org + single repo root: repo root wins, both owner and repo injected
-	clientTransport, serverTransport := mcp.NewInMemoryTransports()
-
-	server := mcp.NewServer(&mcp.Implementation{
-		Name:    "test-server",
-		Version: "0.1.0",
-	}, nil)
-
-	server.AddReceivingMiddleware(RootsMiddleware("github.com", testLogger()))
-
-	server.AddTool(&mcp.Tool{
-		Name:        "echo_args",
-		Description: "Echoes back arguments",
-		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		},
-	}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{Text: string(req.Params.Arguments)},
-			},
-		}, nil
+		assert.False(t, result.IsError)
 	})
 
-	ctx := context.Background()
+	t.Run("case-insensitive owner matching", func(t *testing.T) {
+		clientSession, cleanup := setup(t,
+			&mcp.Root{URI: "https://github.com/MyOrg/MyRepo"},
+		)
+		defer cleanup()
 
-	serverSession, err := server.Connect(ctx, serverTransport, nil)
-	require.NoError(t, err)
-	defer serverSession.Close()
-
-	client := mcp.NewClient(&mcp.Implementation{
-		Name:    "test-client",
-		Version: "0.1.0",
-	}, nil)
-	client.AddRoots(
-		&mcp.Root{URI: "https://github.com/myorg"},
-		&mcp.Root{URI: "https://github.com/myorg/main-app"},
-	)
-
-	clientSession, err := client.Connect(ctx, clientTransport, nil)
-	require.NoError(t, err)
-	defer clientSession.Close()
-
-	result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "echo_args",
-		Arguments: map[string]any{"state": "open"},
-	})
-	require.NoError(t, err)
-	require.Len(t, result.Content, 1)
-
-	text := result.Content[0].(*mcp.TextContent).Text
-	var args map[string]any
-	require.NoError(t, json.Unmarshal([]byte(text), &args))
-	assert.Equal(t, "myorg", args["owner"])
-	assert.Equal(t, "main-app", args["repo"])
-}
-
-func TestRootsMiddleware_OrgPlusMultipleRepoRoots(t *testing.T) {
-	// Org + multiple repo roots: only owner injected (ambiguous repo)
-	clientTransport, serverTransport := mcp.NewInMemoryTransports()
-
-	server := mcp.NewServer(&mcp.Implementation{
-		Name:    "test-server",
-		Version: "0.1.0",
-	}, nil)
-
-	server.AddReceivingMiddleware(RootsMiddleware("github.com", testLogger()))
-
-	server.AddTool(&mcp.Tool{
-		Name:        "echo_args",
-		Description: "Echoes back arguments",
-		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		},
-	}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{Text: string(req.Params.Arguments)},
-			},
-		}, nil
+		// Lowercase owner should match
+		result, err := clientSession.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "echo_args",
+			Arguments: map[string]any{"owner": "myorg", "repo": "myrepo"},
+		})
+		require.NoError(t, err)
+		assert.False(t, result.IsError)
 	})
 
-	ctx := context.Background()
+	t.Run("multiple orgs allows each org", func(t *testing.T) {
+		clientSession, cleanup := setup(t,
+			&mcp.Root{URI: "https://github.com/org-a/repo"},
+			&mcp.Root{URI: "https://github.com/org-b/repo"},
+		)
+		defer cleanup()
 
-	serverSession, err := server.Connect(ctx, serverTransport, nil)
-	require.NoError(t, err)
-	defer serverSession.Close()
+		// org-a allowed
+		result, err := clientSession.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "echo_args",
+			Arguments: map[string]any{"owner": "org-a", "repo": "repo"},
+		})
+		require.NoError(t, err)
+		assert.False(t, result.IsError)
 
-	client := mcp.NewClient(&mcp.Implementation{
-		Name:    "test-client",
-		Version: "0.1.0",
-	}, nil)
-	client.AddRoots(
-		&mcp.Root{URI: "https://github.com/myorg"},
-		&mcp.Root{URI: "https://github.com/myorg/repo-a"},
-		&mcp.Root{URI: "https://github.com/myorg/repo-b"},
-	)
+		// org-b allowed
+		result, err = clientSession.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "echo_args",
+			Arguments: map[string]any{"owner": "org-b", "repo": "repo"},
+		})
+		require.NoError(t, err)
+		assert.False(t, result.IsError)
 
-	clientSession, err := client.Connect(ctx, clientTransport, nil)
-	require.NoError(t, err)
-	defer clientSession.Close()
-
-	result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "echo_args",
-		Arguments: map[string]any{"repo": "repo-a"},
+		// org-c rejected
+		result, err = clientSession.CallTool(context.Background(), &mcp.CallToolParams{
+			Name:      "echo_args",
+			Arguments: map[string]any{"owner": "org-c", "repo": "repo"},
+		})
+		require.NoError(t, err)
+		require.True(t, result.IsError)
 	})
-	require.NoError(t, err)
-	require.Len(t, result.Content, 1)
-
-	text := result.Content[0].(*mcp.TextContent).Text
-	var args map[string]any
-	require.NoError(t, json.Unmarshal([]byte(text), &args))
-	assert.Equal(t, "myorg", args["owner"])
-	assert.Equal(t, "repo-a", args["repo"]) // explicit repo preserved, not overridden
-}
-
-func TestRootsMiddleware_MultipleReposSameOrg(t *testing.T) {
-	// Multiple repo roots with same org (no org root): owner injected, repo not
-	clientTransport, serverTransport := mcp.NewInMemoryTransports()
-
-	server := mcp.NewServer(&mcp.Implementation{
-		Name:    "test-server",
-		Version: "0.1.0",
-	}, nil)
-
-	server.AddReceivingMiddleware(RootsMiddleware("github.com", testLogger()))
-
-	server.AddTool(&mcp.Tool{
-		Name:        "echo_args",
-		Description: "Echoes back arguments",
-		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		},
-	}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{Text: string(req.Params.Arguments)},
-			},
-		}, nil
-	})
-
-	ctx := context.Background()
-
-	serverSession, err := server.Connect(ctx, serverTransport, nil)
-	require.NoError(t, err)
-	defer serverSession.Close()
-
-	client := mcp.NewClient(&mcp.Implementation{
-		Name:    "test-client",
-		Version: "0.1.0",
-	}, nil)
-	client.AddRoots(
-		&mcp.Root{URI: "https://github.com/myorg/repo-a"},
-		&mcp.Root{URI: "https://github.com/myorg/repo-b"},
-	)
-
-	clientSession, err := client.Connect(ctx, clientTransport, nil)
-	require.NoError(t, err)
-	defer clientSession.Close()
-
-	result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "echo_args",
-		Arguments: map[string]any{"state": "open"},
-	})
-	require.NoError(t, err)
-	require.Len(t, result.Content, 1)
-
-	text := result.Content[0].(*mcp.TextContent).Text
-	var args map[string]any
-	require.NoError(t, json.Unmarshal([]byte(text), &args))
-	assert.Equal(t, "myorg", args["owner"])
-	assert.Nil(t, args["repo"]) // ambiguous repo, should not inject
-}
-
-func TestRootsMiddleware_MultipleOrgs(t *testing.T) {
-	// Multiple orgs: no injection at all
-	clientTransport, serverTransport := mcp.NewInMemoryTransports()
-
-	server := mcp.NewServer(&mcp.Implementation{
-		Name:    "test-server",
-		Version: "0.1.0",
-	}, nil)
-
-	server.AddReceivingMiddleware(RootsMiddleware("github.com", testLogger()))
-
-	server.AddTool(&mcp.Tool{
-		Name:        "echo_args",
-		Description: "Echoes back arguments",
-		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		},
-	}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{Text: string(req.Params.Arguments)},
-			},
-		}, nil
-	})
-
-	ctx := context.Background()
-
-	serverSession, err := server.Connect(ctx, serverTransport, nil)
-	require.NoError(t, err)
-	defer serverSession.Close()
-
-	client := mcp.NewClient(&mcp.Implementation{
-		Name:    "test-client",
-		Version: "0.1.0",
-	}, nil)
-	client.AddRoots(
-		&mcp.Root{URI: "https://github.com/org-a/repo"},
-		&mcp.Root{URI: "https://github.com/org-b/repo"},
-	)
-
-	clientSession, err := client.Connect(ctx, clientTransport, nil)
-	require.NoError(t, err)
-	defer clientSession.Close()
-
-	result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "echo_args",
-		Arguments: map[string]any{"owner": "org-a", "repo": "repo"},
-	})
-	require.NoError(t, err)
-	require.Len(t, result.Content, 1)
-
-	text := result.Content[0].(*mcp.TextContent).Text
-	var args map[string]any
-	require.NoError(t, json.Unmarshal([]byte(text), &args))
-	// Explicit values should be preserved, no injection
-	assert.Equal(t, "org-a", args["owner"])
-	assert.Equal(t, "repo", args["repo"])
-}
-
-func TestRootsMiddleware_MixedCaseSameOrg(t *testing.T) {
-	// Mixed-case owner names should be treated as the same org (GitHub is case-insensitive)
-	clientTransport, serverTransport := mcp.NewInMemoryTransports()
-
-	server := mcp.NewServer(&mcp.Implementation{
-		Name:    "test-server",
-		Version: "0.1.0",
-	}, nil)
-
-	server.AddReceivingMiddleware(RootsMiddleware("github.com", testLogger()))
-
-	server.AddTool(&mcp.Tool{
-		Name:        "echo_args",
-		Description: "Echoes back arguments",
-		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		},
-	}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{Text: string(req.Params.Arguments)},
-			},
-		}, nil
-	})
-
-	ctx := context.Background()
-
-	serverSession, err := server.Connect(ctx, serverTransport, nil)
-	require.NoError(t, err)
-	defer serverSession.Close()
-
-	client := mcp.NewClient(&mcp.Implementation{
-		Name:    "test-client",
-		Version: "0.1.0",
-	}, nil)
-	// Mixed case: "MyOrg" and "myorg" should be treated as the same owner
-	client.AddRoots(
-		&mcp.Root{URI: "https://github.com/MyOrg/Repo-A"},
-		&mcp.Root{URI: "https://github.com/myorg/repo-b"},
-	)
-
-	clientSession, err := client.Connect(ctx, clientTransport, nil)
-	require.NoError(t, err)
-	defer clientSession.Close()
-
-	result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "echo_args",
-		Arguments: map[string]any{"state": "open"},
-	})
-	require.NoError(t, err)
-	require.Len(t, result.Content, 1)
-
-	text := result.Content[0].(*mcp.TextContent).Text
-	var args map[string]any
-	require.NoError(t, json.Unmarshal([]byte(text), &args))
-	// Both are same org after normalization — owner should be injected
-	assert.Equal(t, "myorg", args["owner"])
-	// Two repo roots — repo should NOT be injected (ambiguous)
-	assert.Nil(t, args["repo"])
-}
-
-func TestRootsMiddleware_NoRoots(t *testing.T) {
-	// When no roots are configured, middleware should pass through
-	clientTransport, serverTransport := mcp.NewInMemoryTransports()
-
-	server := mcp.NewServer(&mcp.Implementation{
-		Name:    "test-server",
-		Version: "0.1.0",
-	}, nil)
-
-	server.AddReceivingMiddleware(RootsMiddleware("github.com", testLogger()))
-
-	server.AddTool(&mcp.Tool{
-		Name:        "echo_args",
-		Description: "Echoes back arguments",
-		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		},
-	}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{
-				&mcp.TextContent{Text: string(req.Params.Arguments)},
-			},
-		}, nil
-	})
-
-	ctx := context.Background()
-
-	serverSession, err := server.Connect(ctx, serverTransport, nil)
-	require.NoError(t, err)
-	defer serverSession.Close()
-
-	client := mcp.NewClient(&mcp.Implementation{
-		Name:    "test-client",
-		Version: "0.1.0",
-	}, nil)
-	// No roots configured
-
-	clientSession, err := client.Connect(ctx, clientTransport, nil)
-	require.NoError(t, err)
-	defer clientSession.Close()
-
-	result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "echo_args",
-		Arguments: map[string]any{"state": "open"},
-	})
-	require.NoError(t, err)
-	require.Len(t, result.Content, 1)
-
-	text := result.Content[0].(*mcp.TextContent).Text
-	var args map[string]any
-	require.NoError(t, json.Unmarshal([]byte(text), &args))
-	// No roots means no injection
-	assert.Nil(t, args["owner"])
-	assert.Nil(t, args["repo"])
 }
