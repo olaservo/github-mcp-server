@@ -64,12 +64,14 @@ func ParseGitHubRootURI(uri string, host string) (owner, repo string, err error)
 		return "", "", fmt.Errorf("URI %q has no path", uri)
 	}
 
-	owner = segments[0]
+	// GitHub usernames and org names are case-insensitive, so normalize
+	// to lowercase for consistent comparison in the middleware.
+	owner = strings.ToLower(segments[0])
 
 	// If there's a second segment, treat it as the repo (repo-level root).
 	// Otherwise, this is an org-level root with repo = "".
 	if len(segments) >= 2 && segments[1] != "" {
-		repo = strings.TrimSuffix(segments[1], ".git")
+		repo = strings.ToLower(strings.TrimSuffix(segments[1], ".git"))
 	}
 
 	return owner, repo, nil

@@ -550,6 +550,25 @@ docker run -i --rm \
   ghcr.io/github/github-mcp-server
 ```
 
+### MCP Roots (Insiders)
+
+When running in insiders mode, the server supports [MCP roots](https://modelcontextprotocol.io/docs/concepts/roots) to automatically scope tool operations to specific GitHub organizations or repositories. If your MCP client sends roots like `https://github.com/myorg` or `https://github.com/myorg/myrepo`, the server will use them as defaults for `owner` and `repo` parameters.
+
+**How injection works:**
+
+| Roots configured | `owner` injected | `repo` injected |
+|-----------------|-------------------|-----------------|
+| `https://github.com/org` | Yes | No |
+| `https://github.com/org/repo` | Yes | Yes |
+| `org` + `org/repo` | Yes | Yes (repo root wins) |
+| `org/repo-a` + `org/repo-b` | Yes | No (ambiguous) |
+| `org-a/...` + `org-b/...` | No | No (ambiguous) |
+
+- The `list_roots` tool (insiders-only) shows which roots are active and their parsed scope.
+- Explicit `owner`/`repo` arguments in tool calls always take precedence over root defaults.
+
+> **Note:** Roots are a convenience feature that provides default parameter values — they are not a security boundary. Tool calls with explicit `owner` and `repo` arguments bypass roots entirely, meaning any repository accessible by the configured token can still be targeted. For access control, use appropriately scoped tokens such as [fine-grained personal access tokens](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#fine-grained-personal-access-tokens) limited to specific repositories.
+
 ### Available Toolsets
 
 The following sets of tools are available:
