@@ -147,8 +147,10 @@ func RootsEnforcementMiddleware(host string, logger *slog.Logger) mcp.Middleware
 //   - If exactly one repo-level root exists, also inject repo when missing
 //   - If roots span multiple owners, no injection (fully ambiguous)
 //
-// This middleware is designed to run after RootsEnforcementMiddleware.
-// Injected values always come from roots, so they are inherently valid.
+// This middleware is the outer (first-to-execute) middleware, running before
+// RootsEnforcementMiddleware. It fills in missing values so that enforcement
+// always sees the complete set of arguments. Injected values come from roots,
+// so they are inherently valid and will pass enforcement.
 func RootsInjectionMiddleware(host string, logger *slog.Logger) mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, request mcp.Request) (mcp.Result, error) {
